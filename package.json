@@ -1,20 +1,152 @@
-{
-    "name": "R-NPV",
-    "version": "1.0.0",
-    "description": "",
-    "scripts": {
-        "build": "echo \"No build specified\" && exit 1",
-        "test": "echo \"No test specified\" && exit 1",
-        "start": "node index.js"
-    },
-    "repository": {
-        "type": "git",
-        "url": "git+https://github.com/3H54N/R-NPV.git"
-    },
-    "author": "",
-    "license": "ISC",
-    "bugs": {
-        "url": "https://github.com/3H54N/R-NPV/issues"
-    },
-    "homepage": "https://github.com/3H54N/R-NPV#readme"
-}
+version: v1
+kind: Environment
+metadata:
+  com.bunnyshell.k8s.id: 123
+  com.bunnyshell.k8s.unique: {alphanumeric}
+  com.bunnyshell.k8s.docker-compose-version: 3.4
+  arbitrary: value
+name: my-env
+type: primary | ephemeral
+components:
+  - kind: Service
+    version: v1
+    metadata:
+      com.bunnyshell.k8s.id: 123 # Bunnyshell ID, optional
+      com.bunnyshell.k8s.display-name: Web Server
+      com.bunnyshell.k8s.source-file: git.repo.com/.docker/docker-compose.yaml
+      com.bunnyshell.k8s.source-file-hash: {alphanumeric}
+      com.bunnyshell.k8s.source-block-hash: {alphanumeric}
+      com.bunnyshell.k8s.source-name: nginx
+    name: nginx
+    gitRepo: git@...
+    gitBranch: master
+    gitApplicationPath: / # optional; for monorepo apps
+    gitDockerComposePath: / # the path of the docker-compose.yaml inside the git_repo
+    dockerCompose:
+      build:
+        context: .docker/nginx
+        dockerfile: Dockerfile
+        args:
+          buildno: 1
+    envVarMapping:
+    k8s:
+      resources: # k8s resources for this service; k8s syntax
+        requests:
+          cpu: "0.5"
+          memory: "100Mi"
+        limits:
+          cpu: "900m"
+          memory: "0.5Gi"
+    pod:
+      init_containers:
+        -
+          from: frontend
+          name: # the name of the container
+          shared_paths:
+            -
+              path: /var/www/public # path on this service container (e.g. frontend)
+              target:
+                container: '@parent'
+                path: /var/www/html/public # path on the pod-colocated service container (e.g. nginx)
+              initial_contents: '@self'
+      sidecar_containers:
+        -
+          from: php
+          name: # the name of the container
+    hosts: # you can add more
+      - hostname: app # will be suffixed with -${env_unique}.bunnyenv.com
+        path: / # optional
+        servicePort: 8080
+        public: true # will be publicly available, even if the user IP does not exist in security.allowedIps
+    preReleaseCommands:
+    cronJobs:
+
+  - kind: Database
+    metadata:
+      com.bunnyshell.k8s.id: 456 # Bunnyshell ID, optional
+      com.bunnyshell.k8s.display-name: Database
+      com.bunnyshell.k8s.source-file: git.repo.com/.docker/docker-compose.yaml
+      com.bunnyshell.k8s.source-file-hash: {alphanumeric}
+      com.bunnyshell.k8s.source-block-hash: {alphanumeric}
+      com.bunnyshell.k8s.source-name: mysql
+    name: mysql
+    gitRepo: git@...
+    gitBranch: master
+    gitApplicationPath: / # optional; for monorepo apps
+    gitDockerComposePath: / # the path of the docker-compose.yaml inside the git_repo
+    dockerCompose:
+      build:
+        context: .docker/mysql
+        dockerfile: Dockerfile
+        args:
+          buildno: 1
+    envVarMapping:
+    k8s:
+      resources: # k8s resources for this service; k8s syntax
+        requests:
+          cpu: "0.5"
+          memory: "100Mi"
+        limits:
+          cpu: "900m"
+          memory: "0.5Gi"
+    podSharing:
+    hosts:
+    preReleaseCommands:
+    cronJobs:
+    dbSeed: anonymized-dumps/stage-complex-scenarios.sql:v3
+security:
+  access:
+    allowedIps: # only IPs in these ranges will be able to access the non-public hosts
+      - '192.168.0.1/24'
+      - '192.12.45.123/32'
+      
+  - kind: SidecarContainer
+    version: v1
+    metadata:
+      com.bunnyshell.k8s.display-name: PHP App
+      com.bunnyshell.k8s.source-file: git.repo.com/.docker/docker-compose.yaml
+      com.bunnyshell.k8s.source-file-hash: {alphanumeric}
+      com.bunnyshell.k8s.source-block-hash: {alphanumeric}
+      com.bunnyshell.k8s.source-name: php
+    name: php
+    gitRepo: git@...
+    gitBranch: master
+    gitApplicationPath: / # optional; for monorepo apps
+    gitDockerComposePath: / # the path of the docker-compose.yaml inside the git_repo
+    dockerCompose:
+      # image: ... # if present, `image` will be removed, we will build the image and after that we will add the image: with the value from our Amazon ECR
+      build:
+        context: .docker/php
+        dockerfile: Dockerfile
+        args:
+          buildno: 1
+    envVarMapping:
+      API_PATH: BNS_INGRESS_URL_NGINX # BNS_ are auto-generated
+    k8s:
+      resources: # k8s resources for this service; k8s syntax
+        requests:
+          cpu: "0.5"
+          memory: "100Mi"
+        limits:
+          cpu: "900m"
+          memory: "0.5Gi"
+    hosts: # you can add more
+      - hostname: app # will be suffixed with -${env_unique}.bunnyenv.com
+        path: / # optional
+        servicePort: 8080
+    preReleaseCommands: # every new pod for this Application will first run these commands in order and wait until they are succesfull; only after their success, the pod will start
+      - php bin/console doctrine:migrations -y
+    cronJobs:
+      - name: check-git-status
+        schedule: "*/1 * * * *" # k8s Cron schedule syntax (https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/#cron-schedule-syntax);
+        command: php bin/console git:check-status # this will be passed as an argument to `/bin/sh -c`
+
+  - kind: InitContainer
+    version: v1
+    name: frontend
+    gitRepo: git@...
+    gitBranch: master
+    gitApplicationPath: / # optional; for monorepo apps
+    dockerCompose:
+      build:
+        context: frontend
